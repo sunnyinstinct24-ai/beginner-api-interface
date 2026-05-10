@@ -37,7 +37,7 @@ const CACHE_READ_MULT = 0.1;
 
 // ---------- Supabase + state ----------
 
-let supabase = null;
+let db = null;
 let state = {
   user: null,
   projects: [],
@@ -108,9 +108,9 @@ async function initSupabase() {
     showSetupError("Supabase JS SDK didn't load. Check your network and refresh.");
     return;
   }
-  supabase = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+  db = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
 
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { session } } = await db.auth.getSession();
   if (session) {
     state.user = session.user;
     await enterApp();
@@ -118,7 +118,7 @@ async function initSupabase() {
     showSignInScreen();
   }
 
-  supabase.auth.onAuthStateChange(async (event, session) => {
+  db.auth.onAuthStateChange(async (event, session) => {
     if (event === "SIGNED_IN" && session) {
       state.user = session.user;
       await enterApp();
@@ -132,8 +132,8 @@ async function initSupabase() {
 }
 
 async function signIn(email) {
-  if (!supabase) return;
-  const { error } = await supabase.auth.signInWithOtp({
+  if (!db) return;
+  const { error } = await db.auth.signInWithOtp({
     email,
     options: { emailRedirectTo: window.location.origin },
   });
@@ -148,7 +148,7 @@ async function signIn(email) {
 }
 
 async function signOut() {
-  if (supabase) await supabase.auth.signOut();
+  if (db) await db.auth.signOut();
 }
 
 function showSignInScreen() {
@@ -177,7 +177,7 @@ async function enterApp() {
 // ---------- Data layer ----------
 
 async function loadAllData() {
-  const { data: projectRows, error: pErr } = await supabase
+  const { data: projectRows, error: pErr } = await db
     .from("projects").select("*").order("created_at", { ascending: false });
   if (pErr) { console.error(pErr); alert(`Couldn't load projects: ${pErr.message}`); return; }
 
@@ -186,8 +186,8 @@ async function loadAllData() {
 
   const ids = projects.map(p => p.id);
   const [{ data: convRows }, { data: fileRows }] = await Promise.all([
-    supabase.from("conversations").select("*").in("project_id", ids).order("created_at", { ascending: false }),
-    supabase.from("files").select("*").in("project_id", ids).order("created_at", { ascending: true }),
+    db.from("conversations").select("*").in("project_id", ids).order("created_at", { ascending: false }),
+    db.from("files").select("*").in("project_id", ids).order("created_at", { ascending: true }),
   ]);
 
   const byProject = Object.fromEntries(projects.map(p => [p.id, p]));
@@ -205,7 +205,7 @@ async function loadAllData() {
 }
 
 async function dbCreateProject(name) {
-  const { data, error } = await supabase.from("projects").insert({
+  const { data, error } = await db.from("projects").insert({
     user_id: state.user.id,
     name,
     model: DEFAULT_MODEL,
@@ -216,17 +216,17 @@ async function dbCreateProject(name) {
 }
 
 async function dbUpdateProject(id, fields) {
-  const { error } = await supabase.from("projects").update(fields).eq("id", id);
+  const { error } = await db.from("projects").update(fields).eq("id", id);
   if (error) throw error;
 }
 
 async function dbDeleteProject(id) {
-  const { error } = await supabase.from("projects").delete().eq("id", id);
+  const { error } = await db.from("projects").delete().eq("id", id);
   if (error) throw error;
 }
 
 async function dbCreateConversation(projectId, name) {
-  const { data, error } = await supabase.from("conversations").insert({
+  const { data, error } = await db.from("conversations").insert({
     project_id: projectId,
     user_id: state.user.id,
     name,
@@ -236,17 +236,17 @@ async function dbCreateConversation(projectId, name) {
 }
 
 async function dbUpdateConversation(id, fields) {
-  const { error } = await supabase.from("conversations").update(fields).eq("id", id);
+  const { error } = await db.from("conversations").update(fields).eq("id", id);
   if (error) throw error;
 }
 
 async function dbDeleteConversation(id) {
-  const { error } = await supabase.from("conversations").delete().eq("id", id);
+  const { error } = await db.from("conversations").delete().eq("id", id);
   if (error) throw error;
 }
 
 async function dbCreateFile(projectId, file) {
-  const { data, error } = await supabase.from("files").insert({
+  const { data, error } = await db.from("files").insert({
     project_id: projectId,
     user_id: state.user.id,
     name: file.name,
@@ -260,7 +260,7 @@ async function dbCreateFile(projectId, file) {
 }
 
 async function dbDeleteFile(id) {
-  const { error } = await supabase.from("files").delete().eq("id", id);
+  const { error } = await db.from("files").delete().eq("id", id);
   if (error) throw error;
 }
 
@@ -515,7 +515,7 @@ function buildApiMessages(project, conv) {
 // ---------- Streaming ----------
 
 async function streamChat(payload, onEvent) {
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { session } } = await db.auth.getSession();
   if (!session) throw new Error("You're signed out. Refresh to sign back in.");
 
   const response = await fetch("/api/chat", {
