@@ -12,6 +12,7 @@ node_modules/
 
 # Editor / OS
 .DS_Store
+**/.DS_Store
 .idea/
 .vscode/
 *.swp

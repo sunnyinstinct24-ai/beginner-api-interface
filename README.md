@@ -2,6 +2,12 @@
 
 A clean, ready-to-deploy chat UI for the Claude API. No accounts, no database — just deploy to Vercel with your API key and start chatting. Designed as a starting point: clone it, deploy it, and customize from there.
 
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fcrmccarthy79-ai%2Fbeginner-api-interface&env=ANTHROPIC_API_KEY&envDescription=Your%20Anthropic%20API%20key&envLink=https%3A%2F%2Fconsole.anthropic.com%2Fsettings%2Fkeys&project-name=beginner-api-interface&repository-name=beginner-api-interface)
+
+One click → fork to your GitHub → deploy on Vercel. You'll be prompted for your Anthropic API key during setup; that's the only thing you need.
+
+![Beginner API Interface screenshot](docs/screenshot.png)
+
 **What you get:**
 
 - **Projects** in the sidebar, each holding multiple **conversations** (just like Claude.ai).
