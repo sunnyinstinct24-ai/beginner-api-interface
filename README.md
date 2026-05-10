@@ -1,15 +1,19 @@
 # Beginner API Interface
 
-A clean, ready-to-deploy chat UI for the Claude API. No accounts, no database — just deploy to Vercel with your API key and start chatting. Designed as a starting point: clone it, deploy it, and customize from there.
+A clean, ready-to-deploy chat UI for the Claude API. **Auth and per-user data sync are built in** — your deployment requires sign-in by default, so a stranger who finds your URL can't spend your Anthropic credits.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fcrmccarthy79-ai%2Fbeginner-api-interface&env=ANTHROPIC_API_KEY&envDescription=Your%20Anthropic%20API%20key&envLink=https%3A%2F%2Fconsole.anthropic.com%2Fsettings%2Fkeys&project-name=beginner-api-interface&repository-name=beginner-api-interface)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fcrmccarthy79-ai%2Fbeginner-api-interface&env=ANTHROPIC_API_KEY,SUPABASE_URL,SUPABASE_ANON_KEY,SUPABASE_JWT_SECRET&envDescription=See%20docs%2FSUPABASE_SETUP.md%20for%20how%20to%20get%20the%20Supabase%20values&envLink=https%3A%2F%2Fgithub.com%2Fcrmccarthy79-ai%2Fbeginner-api-interface%2Fblob%2Fmain%2Fdocs%2FSUPABASE_SETUP.md&project-name=beginner-api-interface&repository-name=beginner-api-interface)
 
-One click → fork to your GitHub → deploy on Vercel. You'll be prompted for your Anthropic API key during setup; that's the only thing you need.
+> **First time deploying anything?** Read [`docs/SETUP.md`](docs/SETUP.md) — a step-by-step guide with no shortcuts and no assumed knowledge. The only fiddly part is a 5-minute one-time Supabase setup; [`docs/SUPABASE_SETUP.md`](docs/SUPABASE_SETUP.md) walks through that.
 
 ![Beginner API Interface screenshot](docs/screenshot.png)
 
-**What you get:**
+---
 
+## What you get
+
+- **Sign-in required** — Supabase magic-link auth. Each user gets their own private space.
+- **Cross-device sync** — sign in on your phone, see your laptop's conversations. All data lives in your Supabase project.
 - **Projects** in the sidebar, each holding multiple **conversations** (just like Claude.ai).
 - **Model switcher** — Opus, Sonnet, and Haiku across the 4.x line. Add or remove models with one line of code.
 - **Web search** — toggle it on per project; Claude searches the web when it needs to.
@@ -17,200 +21,122 @@ One click → fork to your GitHub → deploy on Vercel. You'll be prompted for y
 - **File library** — upload PDFs, images, or text/code files and attach them to your messages.
 - **Streaming** responses — text appears as Claude writes it.
 - **Prompt caching** — system prompts and conversation history are auto-cached so follow-up turns cost ~10% of the input price.
-- **Token + cost counters** — per message and cumulative for the conversation. Estimated dollars based on published pricing.
+- **Token + cost counters** — per message and cumulative for the conversation.
 - **Message actions** — copy, regenerate, delete on hover.
-- **Export & import conversations** as Markdown or JSON, so you can move chats between browsers/devices manually.
-- **Everything saved in your browser** (`localStorage`). No login, no Supabase, no backend storage.
+- **Export & import conversations** as Markdown or JSON.
 
-The whole thing is ~1,000 lines of code across 4 files. Read it. Change it. Make it yours.
-
----
-
-> **First time deploying anything to Vercel?** Read [docs/SETUP.md](docs/SETUP.md) — a step-by-step guide with no shortcuts and no assumed knowledge.
-
-## Setup — the 5-minute path
-
-You'll need:
-
-- A GitHub account
-- A Vercel account (free) — sign up at [vercel.com](https://vercel.com) with your GitHub
-- A Claude API key — get one at [console.anthropic.com](https://console.anthropic.com/) → **Settings → API Keys**
-
-Then:
-
-1. **Fork this repo** to your own GitHub account. (Click the **Fork** button at the top of this page.)
-2. Go to [vercel.com/new](https://vercel.com/new) and click **Import** next to your fork.
-3. Vercel will ask if you want to add Environment Variables. Add one:
-   - **Name:** `ANTHROPIC_API_KEY`
-   - **Value:** your API key from Anthropic (starts with `sk-ant-…`)
-4. Click **Deploy**. Wait ~30 seconds.
-5. Vercel gives you a URL like `your-project.vercel.app`. Open it. Start chatting.
-
-Done. That's the whole deployment.
-
-> **If you forgot to add the env var:** Vercel dashboard → your project → **Settings → Environment Variables** → add `ANTHROPIC_API_KEY` → then **Deployments** → most recent → **Redeploy**.
+The whole thing is ~1,500 lines of code across a handful of files. Read it. Change it. Make it yours.
 
 ---
 
-## Local development
+## The 10-minute setup
 
-```bash
-git clone https://github.com/YOUR_USERNAME/beginner-api-interface.git
-cd beginner-api-interface
+You'll need accounts on **GitHub** (free), **Vercel** (free), **Supabase** (free), and **Anthropic** (~$5 minimum).
 
-# Create a .env file with your key
-echo "ANTHROPIC_API_KEY=sk-ant-..." > .env
+1. **Fork this repo.**
+2. **Set up a Supabase project** ([detailed walkthrough](docs/SUPABASE_SETUP.md)). Run the schema, copy 3 values.
+3. **Click the Vercel Deploy button** above. Paste in the 3 Supabase values + your Anthropic API key as environment variables. Hit Deploy.
+4. **Tell Supabase about your URL** so magic-link emails know where to send people back. (Auth → URL Configuration in Supabase.)
+5. **Open the URL, sign in with your email, chat.**
 
-# If you're on a Mac with Homebrew Python, install uv first
-# (Vercel's Python runtime needs it to install dependencies):
-brew install uv
-
-# Run it locally
-npx vercel dev
-```
-
-Then open `http://localhost:3000`.
-
-(`npx vercel dev` will prompt you to link to a Vercel project the first time — pick the one you deployed above, or create a new one. It'll then read `.env` automatically.)
+Full step-by-step in [`docs/SETUP.md`](docs/SETUP.md).
 
 ---
 
-## How the code is organized
+## How it's organized
 
 ```
 beginner-api-interface/
 ├── api/
-│   ├── chat.py          ← Serverless endpoint. Proxies to Anthropic & streams back.
-│   └── requirements.txt ← Python deps for the function (just `anthropic`).
+│   ├── chat.py              ← Serverless endpoint. Verifies JWT, then proxies to Anthropic & streams back.
+│   ├── config.py            ← Returns Supabase URL+anon key from env vars to the frontend.
+│   └── requirements.txt     ← Python deps: anthropic + PyJWT.
 ├── public/
-│   ├── index.html       ← The page skeleton (sidebar + main pane + dialogs).
-│   ├── styles.css       ← All styling. Theme via CSS variables at the top.
-│   └── app.js           ← All client logic (projects, conversations, files, streaming).
-├── vercel.json          ← Tells Vercel how to route requests.
-└── README.md            ← You are here.
+│   ├── index.html           ← Page skeleton: sign-in screen + main shell + dialogs.
+│   ├── styles.css           ← All styling. Theme via CSS variables at the top.
+│   └── app.js               ← All client logic (auth, projects, conversations, files, streaming).
+├── docs/
+│   ├── SETUP.md             ← Beginner walkthrough (this is what you'd send a friend).
+│   ├── SUPABASE_SETUP.md    ← The Supabase-specific bit, broken out for clarity.
+│   ├── supabase-schema.sql  ← Tables + row-level security. Paste-and-run in Supabase SQL Editor.
+│   └── screenshot.png       ← README image.
+├── vercel.json              ← Tells Vercel how to route requests.
+├── LICENSE                  ← MIT.
+└── README.md                ← You are here.
 ```
 
-That's everything. There's no build step, no framework, no bundler.
+There's no build step, no framework, no bundler.
 
 ### What the API does
 
-[`api/chat.py`](api/chat.py) is a single Python serverless function. It accepts a POST with the conversation history and configuration, calls `client.messages.stream(...)`, and forwards events back to the browser over Server-Sent Events:
+[`api/chat.py`](api/chat.py) is a Python serverless function. It:
 
-- `text` — model output deltas
-- `thinking` — extended thinking deltas (when enabled)
-- `tool_use` — when the model invokes a server tool (like web search)
-- `done` — final message with token usage
-- `error` — anything that went wrong
+1. **Verifies the request's JWT** against `SUPABASE_JWT_SECRET`. Anything missing or invalid → 401. This is what stops a stranger from calling `/api/chat` directly with curl.
+2. Builds an Anthropic message stream with caching, optional web search, optional extended thinking.
+3. Forwards events back over Server-Sent Events: text deltas, thinking deltas, tool-use notifications, final usage.
 
-If you toggle web search on, it adds Anthropic's [`web_search` server tool](https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/web-search-tool). If you toggle thinking on, it adds the `thinking` parameter with a 4k token budget.
+[`api/config.py`](api/config.py) is a tiny endpoint the frontend calls on load to get the Supabase URL and anon key — that way the keys live in one place (Vercel env vars) instead of being baked into the HTML.
 
 ### What the client does
 
-[`public/app.js`](public/app.js) keeps everything in `localStorage` under one key: a list of projects, each with its own conversations, files, and settings. When you hit Send, it builds an Anthropic-style messages array (with `image`, `document`, and `text` content blocks for any attached files) and POSTs it to `/api/chat`, then renders the streamed events into the conversation as they arrive.
+[`public/app.js`](public/app.js):
 
----
-
-## A note on cost estimates
-
-The dollar amounts shown next to each message and at the top of each conversation are **estimates** based on Anthropic's published per-million-token pricing at the time this code was written. They're meant to give you a quick sense of "is this conversation expensive?" — they are *not* a substitute for real billing data.
-
-Anthropic occasionally updates pricing (and adds prompt caching, batching discounts, and other features that affect real cost). The single source of truth for what you actually pay is your [Anthropic Console](https://console.anthropic.com/) — check usage there and [the official pricing page](https://www.anthropic.com/pricing) before relying on these numbers for anything real.
-
-To update the prices used in this UI: open [`public/app.js`](public/app.js), find the `MODELS` array near the top, and edit each model's `pricePerMillion: { input, output }`. Set both to `0` if you'd rather just see token counts without any dollar estimate.
-
----
-
-## Customizing
-
-**Add or change models** — edit the `MODELS` array at the top of [`public/app.js`](public/app.js). Each entry needs an `id` (the API model ID), a `label` (what shows in the dropdown), `pricePerMillion` (for the cost estimate), and `supportsThinking` (whether to enable the thinking toggle for it).
-
-**Change the default system prompt** — the `DEFAULT_SYSTEM` constant in `app.js`, or just edit it per-project in the **Settings** dialog.
-
-**Tweak the look** — everything theme-related lives in CSS variables at the top of [`public/styles.css`](public/styles.css). Colors, spacing, sidebar width — change one variable, the whole UI updates. Auto-respects your OS dark/light setting.
-
-**Tune the thinking budget** — `THINKING_BUDGET` constants in both `app.js` and `chat.py`. Higher = more reasoning headroom, but more tokens.
-
-**Add another tool** — in `api/chat.py`, the `tools` array is where Anthropic's server tools (web_search, code_execution, etc.) get added. To add **client-side** tools, you'd handle `content_block_start` events of type `tool_use` in the stream handler and extend the client's event loop.
+1. Calls `/api/config`, initializes the Supabase JS client.
+2. If no session, shows the sign-in screen.
+3. If signed in, loads all your projects/conversations/files from Supabase and renders the app.
+4. Every database write goes back to Supabase. The frontend keeps an in-memory copy for fast rendering, but the source of truth is the database.
+5. When you hit Send, it builds an Anthropic-style messages array (with `image`, `document`, `text` content blocks for any attached files) and POSTs to `/api/chat` with your Supabase access token in the Authorization header.
 
 ---
 
 ## Prompt caching — why your bill drops as the conversation grows
 
-Anthropic's [prompt caching](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching) lets you mark parts of a request as cacheable. This app marks the **system prompt** and the **full conversation prefix** on every turn, so on follow-up messages:
+Anthropic's [prompt caching](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching) lets you mark parts of a request as cacheable. This app marks the **system prompt** and the **full conversation prefix** on every turn, so on follow-up messages the cached portion is billed at ~10% of normal input price. Only newly-added tokens (your latest message + the model's reply) pay full rate.
 
-- The cached portion (everything that hasn't changed) is billed at **~10% of normal input price**.
-- Only newly-added tokens (your latest message + the model's reply) are billed at full rate.
+The cost number shown in the conversation header reflects this — it's lower than a naive `tokens × price` estimate.
 
-For a 50k-token PDF + a 2k-token system prompt, a 10-message back-and-forth costs a small fraction of what it would without caching. The cost number shown in the conversation header reflects this — it'll be lower than a naive `tokens × price` estimate suggests.
+**Two things invalidate the cache:**
 
-**Two things invalidate the cache** (good to know if your costs spike unexpectedly):
-
-1. **Switching the model** mid-conversation. Caches are scoped per-model, so changing from Sonnet to Opus means starting from scratch.
+1. **Switching the model** mid-conversation. Caches are scoped per-model.
 2. **Changing the system prompt.** It's part of the cached prefix, so editing it busts the cache.
 
-Caches also expire after about 5 minutes of inactivity, which is fine for chat — pick up where you left off and the next reply pays full price once, then caching kicks in again.
-
-This is on by default. There's no toggle because there's no downside — short prefixes (under ~1024 tokens) silently aren't cached, and everything else just gets cheaper.
+Caches expire after ~5 minutes of inactivity. Always-on, no toggle — short prefixes silently aren't cached, everything else just gets cheaper.
 
 ---
 
-## Export & import — moving conversations between devices
+## A note on cost estimates
 
-This app stores everything in your browser's `localStorage`, which means **conversations don't follow you across devices.** Open the app on your phone and you start fresh.
+Dollar amounts shown next to each message are **estimates** based on Anthropic's published per-million-token pricing at the time this code was written. They give you a sense of "is this expensive?" but they are *not* a substitute for real billing data. Anthropic occasionally updates pricing.
 
-The workaround: export from one device, import on another.
+The single source of truth is your [Anthropic Console](https://console.anthropic.com/) → Plans & Billing.
 
-- **Export a conversation** → conversation header → **Export ▾** → choose **Markdown** (human-readable) or **JSON** (re-importable).
-- **Import a conversation** → click **Import**, pick a `.json` file you previously exported, and it lands as a new conversation in your active project.
-
-It's manual (you have to AirDrop, email, or download the file yourself), but it works without any account or server. Useful for archiving, sharing, or moving a chat from your laptop to your phone.
-
-> **One caveat:** files attached to messages (PDFs, images) aren't included in exports — only their names. Imported conversations show the message text but not the original attachments. Re-attach them on the new device if you need them.
-
-### Want real cross-device sync? Add Supabase.
-
-If you want what most chat apps have — sign in on your phone, see your laptop's conversations — you need server-side storage and authentication. **[Supabase](https://supabase.com)** is the natural upgrade: free tier, Postgres database, auth and row-level security built in, integrates cleanly with Vercel.
-
-The shape of that change:
-
-1. Add Supabase auth (sign-up, sign-in) — replaces "everything is local" with "everything is tied to a user account."
-2. Move `localStorage` reads/writes to Supabase reads/writes (a few hundred lines of swap).
-3. Add a `projects` and `messages` table (and ideally a `files` bucket).
-
-This is the biggest single feature you could add. It's not a one-line change, but it's the standard, well-trodden path. The trade-off is real: you go from "no account, anyone can deploy and use it" to "real product with sign-in." Pick based on whether your users want sync more than they want zero-friction.
+To update prices in the UI: edit `MODELS` in [`public/app.js`](public/app.js). Set both `pricePerMillion` values to `0` to show tokens without dollar estimates.
 
 ---
 
 ## Customizing — the easy way
 
-You don't need to read every line of this codebase to change it. The fastest path:
+You don't need to read every line of this codebase to change it.
 
-1. **Clone this repo** to your computer (or open your fork's folder if you have it locally).
-2. Open it in [Claude Code](https://claude.com/claude-code) (or any AI coding assistant) — `cd` into the folder and run `claude`.
+1. **Clone your fork** to your computer.
+2. Open it in [Claude Code](https://claude.com/claude-code) — `cd` into the folder and run `claude`.
 3. **Tell Claude what you want.** Examples:
-   - *"Anthropic released a new Sonnet 4.7 model — add it to the model list, make it the default, and remove Sonnet 4."*
-   - *"Add a button that exports all conversations across all projects into one zip."*
-   - *"Change the color scheme to match my brand: primary color #6366f1, dark backgrounds."*
-   - *"Add a system-prompt template picker — let me save and reuse common prompts."*
-4. Claude will read the relevant files, propose the change, and edit the code. Review the diff, push to GitHub, and Vercel auto-deploys in 30 seconds.
+   - *"Anthropic released Sonnet 4.7 — add it to the model list, make it default, remove Sonnet 4."*
+   - *"Change the color scheme to match my brand: primary color #6366f1."*
+   - *"Add a system-prompt template picker."*
+   - *"Render markdown in assistant responses."*
+4. Claude reads the relevant files, proposes the change, edits the code. Review the diff, push to GitHub, Vercel auto-deploys in 30 seconds.
 
-This is genuinely how this README was written and how the app was built — Claude reading the codebase, you describing the change, code coming back. If something Anthropic releases tomorrow makes a model in this README obsolete, that's your fix-it path: tell Claude, ship the diff.
+This README and most of this app were built that way.
 
 ---
 
 ## What this isn't
 
-This is a reference, not a product. On purpose, it doesn't include:
-
-- **Authentication** — anyone with the URL can use it, and your API key pays for every message they send. Three ways to handle that, in order of effort:
-  - **Vercel Authentication** (free on Hobby) — locks the deployment behind a Vercel sign-in. See [docs/SETUP.md → Step 4](docs/SETUP.md#step-4-lock-it-down-before-sharing-the-url-recommended) for the click-by-click steps.
-  - **Password Protection** (custom shared password anyone can type in) — same Deployment Protection page, but currently a paid feature. Verify in your account.
-  - **Roll your own** — add basic auth or a sign-in flow in the code yourself.
-- **Cross-device sync** — `localStorage` is per-browser. Open it on your phone and you start fresh. (Use the export buttons to move conversations.)
-- **Markdown rendering** — assistant output is plain text. Add [marked](https://github.com/markedjs/marked) or [remark](https://github.com/remarkjs/remark) if you want code blocks, lists, etc. rendered.
-- **Batch API / files API** — Anthropic features for offline bulk requests and large file management. Worth adding for advanced use cases. (Prompt caching IS included — see above.)
-
-Each of these is a small extension. The point of this repo is to give you something simple that works, so you can add what you need without fighting the existing code.
+- **Foolproof.** A determined attacker who got your `SUPABASE_JWT_SECRET` could forge tokens. Keep it secret. The repo's `.gitignore` covers `.env`; if you ever expose the secret, rotate it in Supabase Settings → API.
+- **Free of Anthropic charges.** The auth wall stops *strangers* from costing you money. Your own usage still hits your bill. Set a spending cap at [console.anthropic.com](https://console.anthropic.com/) → Plans & Billing.
+- **Without rate limits.** Nothing in this code stops a signed-in user from hammering `/api/chat`. If that's a concern, add rate-limiting at the Vercel edge or in the function.
+- **A finished product.** It's a learning reference designed to be modified. Markdown rendering, real-time multi-user sync, file storage, batch API — all good extensions.
 
 ---
 

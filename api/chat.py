@@ -4,18 +4,15 @@ Serverless endpoint that proxies chat requests to the Claude API.
 Runs on Vercel's Python runtime. Streams the model's response back to the
 browser using Server-Sent Events (SSE) so messages appear as they're written.
 
-Required environment variable:
-  ANTHROPIC_API_KEY  — get one at console.anthropic.com
+Authentication: every request must carry a Supabase access token in the
+Authorization header (the frontend gets this from supabase.auth.getSession()).
+We verify the token against SUPABASE_JWT_SECRET. Anything missing or invalid
+returns 401 — that's what stops a stranger who finds the URL from spending
+your API credits.
 
-The browser sends a POST with JSON like:
-  {
-    "model":        "claude-sonnet-4-6",
-    "system":       "You are a helpful assistant.",
-    "messages":     [{"role": "user", "content": [...]}],
-    "useWebSearch": false,
-    "thinking":     false,
-    "maxTokens":    4096
-  }
+Required environment variables:
+  ANTHROPIC_API_KEY     — get one at console.anthropic.com
+  SUPABASE_JWT_SECRET   — Supabase project Settings → API → JWT Secret
 """
 
 from http.server import BaseHTTPRequestHandler
@@ -23,6 +20,7 @@ import json
 import os
 
 import anthropic
+import jwt
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_MAX_TOKENS = 4096
@@ -36,6 +34,11 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
+        # ---- Auth gate ----
+        user_id = self._verify_auth()
+        if not user_id:
+            return self._json_error(401, "Authentication required. Please sign in.")
+
         try:
             length = int(self.headers.get("Content-Length", "0"))
             data = json.loads(self.rfile.read(length) or b"{}")
@@ -52,7 +55,6 @@ class handler(BaseHTTPRequestHandler):
 
         max_tokens = int(data.get("maxTokens") or DEFAULT_MAX_TOKENS)
         if data.get("thinking"):
-            # max_tokens must exceed the thinking budget; give the response some headroom.
             max_tokens = max(max_tokens, THINKING_BUDGET + 4096)
 
         kwargs = {
@@ -62,9 +64,6 @@ class handler(BaseHTTPRequestHandler):
         }
         system = data.get("system")
         if system:
-            # Wrap the system prompt as a cacheable text block. Anthropic
-            # ignores cache markers on content under ~1024 tokens, so short
-            # prompts still work but won't be cached.
             kwargs["system"] = [{
                 "type": "text",
                 "text": system,
@@ -107,6 +106,32 @@ class handler(BaseHTTPRequestHandler):
         except Exception as e:
             self._sse({"type": "error", "error": str(e)})
 
+    # ---- Helpers ----
+
+    def _verify_auth(self):
+        """Verify the Supabase access token. Returns user_id or None."""
+        auth = self.headers.get("Authorization", "")
+        if not auth.startswith("Bearer "):
+            return None
+        token = auth[len("Bearer "):].strip()
+        if not token:
+            return None
+        secret = os.environ.get("SUPABASE_JWT_SECRET")
+        if not secret:
+            # Fail closed — if the secret isn't configured we can't verify
+            # anything, so refuse to serve rather than allowing through.
+            return None
+        try:
+            payload = jwt.decode(
+                token,
+                secret,
+                algorithms=["HS256"],
+                audience="authenticated",
+            )
+            return payload.get("sub")
+        except jwt.PyJWTError:
+            return None
+
     def _handle_event(self, event):
         t = getattr(event, "type", None)
         if t == "content_block_start":
@@ -135,7 +160,7 @@ class handler(BaseHTTPRequestHandler):
     def _cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
     def _json_error(self, code, message):
         self.send_response(code)

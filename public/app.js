@@ -1,37 +1,23 @@
 /*
- * Beginner API Interface — client logic
+ * Beginner API Interface — client logic (Supabase-backed)
  *
- * Everything is stored in localStorage. There's no backend database.
- * The only network call is to /api/chat, which proxies to the Claude API.
+ * Auth: Supabase magic link. No session = sign-in screen.
+ * Storage: Supabase tables (projects, conversations, files) protected by
+ *   row-level security so users only see their own data.
  *
- * State shape (one big JSON blob under STORAGE_KEY):
- *   {
- *     activeProjectId: string | null,
- *     projects: [
- *       {
- *         id, name, model, systemPrompt, webSearch, thinking,
- *         files: [{ id, name, kind, mediaType, data, size }],
- *         conversations: [
- *           {
- *             id, name, createdAt,
- *             messages: [{ id, role, text, fileIds?, thinkingText?, toolEvents?, usage?, error? }],
- *             activeFileIds: string[]
- *           }
- *         ],
- *         activeConversationId
- *       }
- *     ]
- *   }
+ * Flow on page load:
+ *   1. Fetch /api/config → init Supabase client.
+ *   2. Check session. None → show sign-in screen and stop.
+ *   3. Have session → load all the user's projects (with conversations
+ *      and files), render the app.
+ *
+ * Every API call to /api/chat carries a Bearer token (the user's Supabase
+ * access token). The serverless function verifies it before spending
+ * any Anthropic credits.
  */
 
-const STORAGE_KEY = "beginner-api-interface:v2";
-const LEGACY_STORAGE_KEYS = ["beginner-api-interface:v1"];
+// ---------- Constants ----------
 
-/*
- * Pricing is best-effort. Anthropic updates rates from time to time — always
- * check the live numbers in your console (console.anthropic.com) and the docs
- * (docs.anthropic.com). Set both to 0 to display tokens without a $ estimate.
- */
 const MODELS = [
   { id: "claude-opus-4-6",            label: "Opus 4.6",       pricePerMillion: { input: 15, output: 75 }, supportsThinking: true },
   { id: "claude-opus-4-5-20251101",   label: "Opus 4.5",       pricePerMillion: { input: 15, output: 75 }, supportsThinking: true },
@@ -46,61 +32,239 @@ const MODELS = [
 const DEFAULT_MODEL = "claude-sonnet-4-6";
 const DEFAULT_SYSTEM = "You are Claude, a helpful AI assistant.";
 const THINKING_BUDGET = 4096;
+const CACHE_WRITE_MULT = 1.25;
+const CACHE_READ_MULT = 0.1;
 
-// ---------- State ----------
+// ---------- Supabase + state ----------
 
-function loadState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return migrateState(JSON.parse(raw));
-  } catch {}
-  for (const legacy of LEGACY_STORAGE_KEYS) {
-    try {
-      const raw = localStorage.getItem(legacy);
-      if (raw) return migrateState(JSON.parse(raw));
-    } catch {}
-  }
-  return { activeProjectId: null, projects: [] };
-}
+let supabase = null;
+let state = {
+  user: null,
+  projects: [],
+  activeProjectId: null,
+};
 
-function migrateState(state) {
-  if (!Array.isArray(state.projects)) state.projects = [];
-  for (const p of state.projects) {
-    if (!Array.isArray(p.conversations)) {
-      const convId = uid();
-      p.conversations = [{
-        id: convId,
-        name: "Conversation 1",
-        createdAt: Date.now(),
-        messages: Array.isArray(p.messages) ? p.messages : [],
-        activeFileIds: Array.isArray(p.activeFileIds) ? p.activeFileIds : [],
-      }];
-      p.activeConversationId = convId;
-      delete p.messages;
-      delete p.activeFileIds;
-    }
-    if (!p.activeConversationId && p.conversations[0]) {
-      p.activeConversationId = p.conversations[0].id;
-    }
-    if (typeof p.thinking !== "boolean") p.thinking = false;
-  }
-  return state;
-}
-
-function saveState() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch (e) {
-    console.error("Failed to save state — localStorage might be full.", e);
-    alert("Couldn't save. Browser storage may be full (large files use a lot of space).");
-  }
-}
-
-let state = loadState();
+const $ = (id) => document.getElementById(id);
 
 const uid = () =>
   (crypto?.randomUUID && crypto.randomUUID()) ||
   Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+// ---------- Mappers (DB row ↔ in-memory shape) ----------
+
+function rowToProject(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    model: row.model,
+    systemPrompt: row.system_prompt || "",
+    webSearch: !!row.web_search,
+    thinking: !!row.thinking,
+    activeConversationId: row.active_conversation_id || null,
+    conversations: [],
+    files: [],
+  };
+}
+
+function rowToConversation(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    messages: Array.isArray(row.messages) ? row.messages : [],
+    activeFileIds: Array.isArray(row.active_file_ids) ? row.active_file_ids : [],
+  };
+}
+
+function rowToFile(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    kind: row.kind,
+    mediaType: row.media_type,
+    size: row.size || 0,
+    data: row.data,
+  };
+}
+
+// ---------- Auth ----------
+
+async function initSupabase() {
+  let cfg;
+  try {
+    const r = await fetch("/api/config");
+    cfg = await r.json();
+  } catch (e) {
+    showSetupError("Couldn't reach /api/config. Make sure the project is deployed and try refreshing.");
+    return;
+  }
+  if (!cfg.configured) {
+    showSetupError(
+      "Supabase isn't configured yet. Add SUPABASE_URL and SUPABASE_ANON_KEY in your Vercel project's " +
+      "Settings → Environment Variables, then redeploy. See docs/SUPABASE_SETUP.md."
+    );
+    return;
+  }
+  if (!window.supabase || typeof window.supabase.createClient !== "function") {
+    showSetupError("Supabase JS SDK didn't load. Check your network and refresh.");
+    return;
+  }
+  supabase = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session) {
+    state.user = session.user;
+    await enterApp();
+  } else {
+    showSignInScreen();
+  }
+
+  supabase.auth.onAuthStateChange(async (event, session) => {
+    if (event === "SIGNED_IN" && session) {
+      state.user = session.user;
+      await enterApp();
+    } else if (event === "SIGNED_OUT") {
+      state.user = null;
+      state.projects = [];
+      state.activeProjectId = null;
+      showSignInScreen();
+    }
+  });
+}
+
+async function signIn(email) {
+  if (!supabase) return;
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: window.location.origin },
+  });
+  const msg = $("signin-msg");
+  if (error) {
+    msg.textContent = error.message;
+    msg.className = "signin-msg error";
+  } else {
+    msg.textContent = `Check ${email} for a sign-in link.`;
+    msg.className = "signin-msg success";
+  }
+}
+
+async function signOut() {
+  if (supabase) await supabase.auth.signOut();
+}
+
+function showSignInScreen() {
+  $("signin-screen").hidden = false;
+  $("app-shell").hidden = true;
+  $("setup-error").hidden = true;
+}
+
+function showSetupError(msg) {
+  $("setup-error").hidden = false;
+  $("setup-error-msg").textContent = msg;
+  $("signin-screen").hidden = true;
+  $("app-shell").hidden = true;
+}
+
+async function enterApp() {
+  $("signin-screen").hidden = true;
+  $("setup-error").hidden = true;
+  $("app-shell").hidden = false;
+  $("user-email").textContent = state.user?.email || "";
+  await loadAllData();
+  if (!state.projects.length) await createProject("My first project");
+  else render();
+}
+
+// ---------- Data layer ----------
+
+async function loadAllData() {
+  const { data: projectRows, error: pErr } = await supabase
+    .from("projects").select("*").order("created_at", { ascending: false });
+  if (pErr) { console.error(pErr); alert(`Couldn't load projects: ${pErr.message}`); return; }
+
+  const projects = (projectRows || []).map(rowToProject);
+  if (projects.length === 0) { state.projects = []; state.activeProjectId = null; return; }
+
+  const ids = projects.map(p => p.id);
+  const [{ data: convRows }, { data: fileRows }] = await Promise.all([
+    supabase.from("conversations").select("*").in("project_id", ids).order("created_at", { ascending: false }),
+    supabase.from("files").select("*").in("project_id", ids).order("created_at", { ascending: true }),
+  ]);
+
+  const byProject = Object.fromEntries(projects.map(p => [p.id, p]));
+  for (const row of convRows || []) byProject[row.project_id]?.conversations.push(rowToConversation(row));
+  for (const row of fileRows || []) byProject[row.project_id]?.files.push(rowToFile(row));
+
+  for (const p of projects) {
+    if (!p.activeConversationId && p.conversations[0]) p.activeConversationId = p.conversations[0].id;
+  }
+
+  state.projects = projects;
+  state.activeProjectId = state.activeProjectId && projects.find(p => p.id === state.activeProjectId)
+    ? state.activeProjectId
+    : projects[0]?.id || null;
+}
+
+async function dbCreateProject(name) {
+  const { data, error } = await supabase.from("projects").insert({
+    user_id: state.user.id,
+    name,
+    model: DEFAULT_MODEL,
+    system_prompt: DEFAULT_SYSTEM,
+  }).select().single();
+  if (error) throw error;
+  return rowToProject(data);
+}
+
+async function dbUpdateProject(id, fields) {
+  const { error } = await supabase.from("projects").update(fields).eq("id", id);
+  if (error) throw error;
+}
+
+async function dbDeleteProject(id) {
+  const { error } = await supabase.from("projects").delete().eq("id", id);
+  if (error) throw error;
+}
+
+async function dbCreateConversation(projectId, name) {
+  const { data, error } = await supabase.from("conversations").insert({
+    project_id: projectId,
+    user_id: state.user.id,
+    name,
+  }).select().single();
+  if (error) throw error;
+  return rowToConversation(data);
+}
+
+async function dbUpdateConversation(id, fields) {
+  const { error } = await supabase.from("conversations").update(fields).eq("id", id);
+  if (error) throw error;
+}
+
+async function dbDeleteConversation(id) {
+  const { error } = await supabase.from("conversations").delete().eq("id", id);
+  if (error) throw error;
+}
+
+async function dbCreateFile(projectId, file) {
+  const { data, error } = await supabase.from("files").insert({
+    project_id: projectId,
+    user_id: state.user.id,
+    name: file.name,
+    kind: file.kind,
+    media_type: file.mediaType,
+    size: file.size,
+    data: file.data,
+  }).select().single();
+  if (error) throw error;
+  return rowToFile(data);
+}
+
+async function dbDeleteFile(id) {
+  const { error } = await supabase.from("files").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ---------- Project / conversation ops ----------
 
 function getActiveProject() {
   return state.projects.find(p => p.id === state.activeProjectId) || null;
@@ -115,109 +279,120 @@ function modelInfo(id) {
   return MODELS.find(m => m.id === id) || { id, label: id, pricePerMillion: { input: 0, output: 0 }, supportsThinking: false };
 }
 
-// ---------- Project / conversation ops ----------
-
-function createProject(name = "New project") {
-  const convId = uid();
-  const project = {
-    id: uid(),
-    name,
-    model: DEFAULT_MODEL,
-    systemPrompt: DEFAULT_SYSTEM,
-    webSearch: false,
-    thinking: false,
-    files: [],
-    conversations: [{
-      id: convId,
-      name: "Conversation 1",
-      createdAt: Date.now(),
-      messages: [],
-      activeFileIds: [],
-    }],
-    activeConversationId: convId,
-  };
-  state.projects.unshift(project);
-  state.activeProjectId = project.id;
-  saveState();
-  render();
-  focusAndSelect("project-name");
+async function createProject(name = "New project") {
+  try {
+    const project = await dbCreateProject(name);
+    state.projects.unshift(project);
+    state.activeProjectId = project.id;
+    // Create the first conversation for this project
+    const conv = await dbCreateConversation(project.id, "Conversation 1");
+    project.conversations.push(conv);
+    project.activeConversationId = conv.id;
+    await dbUpdateProject(project.id, { active_conversation_id: conv.id });
+    render();
+    focusAndSelect("project-name");
+  } catch (e) {
+    alert(`Couldn't create project: ${e.message}`);
+  }
 }
 
-function renameProject(id) {
-  const project = state.projects.find(p => p.id === id);
-  if (!project) return;
-  const next = prompt("Rename project:", project.name);
-  if (next === null) return;
-  project.name = next.trim() || project.name;
-  saveState();
-  render();
-}
-
-function deleteProject(id) {
+async function deleteProject(id) {
   if (!confirm("Delete this project and all its conversations? This can't be undone.")) return;
-  state.projects = state.projects.filter(p => p.id !== id);
-  if (state.activeProjectId === id) state.activeProjectId = state.projects[0]?.id ?? null;
-  saveState();
-  render();
+  try {
+    await dbDeleteProject(id);
+    state.projects = state.projects.filter(p => p.id !== id);
+    if (state.activeProjectId === id) state.activeProjectId = state.projects[0]?.id ?? null;
+    render();
+  } catch (e) {
+    alert(`Couldn't delete project: ${e.message}`);
+  }
 }
 
 function selectProject(id) {
   state.activeProjectId = id;
-  saveState();
   render();
 }
 
-function createConversation(name) {
+async function renameProject(id) {
+  const project = state.projects.find(p => p.id === id);
+  if (!project) return;
+  const next = prompt("Rename project:", project.name);
+  if (next === null) return;
+  const name = next.trim() || project.name;
+  project.name = name;
+  render();
+  try { await dbUpdateProject(id, { name }); }
+  catch (e) { alert(`Rename failed: ${e.message}`); }
+}
+
+async function createConversation(name) {
   const project = getActiveProject();
   if (!project) return;
-  const conv = {
-    id: uid(),
-    name: name || `Conversation ${project.conversations.length + 1}`,
-    createdAt: Date.now(),
-    messages: [],
-    activeFileIds: [],
-  };
-  project.conversations.unshift(conv);
-  project.activeConversationId = conv.id;
-  saveState();
-  render();
-  focusAndSelect("conv-name");
+  const fallback = name || `Conversation ${project.conversations.length + 1}`;
+  try {
+    const conv = await dbCreateConversation(project.id, fallback);
+    project.conversations.unshift(conv);
+    project.activeConversationId = conv.id;
+    await dbUpdateProject(project.id, { active_conversation_id: conv.id });
+    render();
+    focusAndSelect("conv-name");
+  } catch (e) {
+    alert(`Couldn't create conversation: ${e.message}`);
+  }
 }
 
-function renameConversation(convId) {
+async function selectConversation(convId) {
+  const project = getActiveProject();
+  if (!project) return;
+  project.activeConversationId = convId;
+  render();
+  try { await dbUpdateProject(project.id, { active_conversation_id: convId }); }
+  catch (e) { console.error(e); }
+}
+
+async function deleteConversation(convId) {
+  const project = getActiveProject();
+  if (!project) return;
+  if (!confirm("Delete this conversation? This can't be undone.")) return;
+  try {
+    await dbDeleteConversation(convId);
+    project.conversations = project.conversations.filter(c => c.id !== convId);
+    if (project.conversations.length === 0) {
+      const conv = await dbCreateConversation(project.id, "Conversation 1");
+      project.conversations.push(conv);
+      project.activeConversationId = conv.id;
+      await dbUpdateProject(project.id, { active_conversation_id: conv.id });
+    } else if (project.activeConversationId === convId) {
+      project.activeConversationId = project.conversations[0].id;
+      await dbUpdateProject(project.id, { active_conversation_id: project.activeConversationId });
+    }
+    render();
+  } catch (e) {
+    alert(`Couldn't delete conversation: ${e.message}`);
+  }
+}
+
+async function renameConversation(convId) {
   const project = getActiveProject();
   if (!project) return;
   const conv = project.conversations.find(c => c.id === convId);
   if (!conv) return;
   const next = prompt("Rename conversation:", conv.name);
   if (next === null) return;
-  conv.name = next.trim() || conv.name;
-  saveState();
+  const name = next.trim() || conv.name;
+  conv.name = name;
   render();
+  try { await dbUpdateConversation(convId, { name }); }
+  catch (e) { alert(`Rename failed: ${e.message}`); }
 }
 
-function selectConversation(convId) {
-  const project = getActiveProject();
-  if (!project) return;
-  project.activeConversationId = convId;
-  saveState();
-  render();
-}
-
-function deleteConversation(convId) {
-  const project = getActiveProject();
-  if (!project) return;
-  if (!confirm("Delete this conversation? This can't be undone.")) return;
-  project.conversations = project.conversations.filter(c => c.id !== convId);
-  if (project.conversations.length === 0) {
-    createConversation();
-    return;
-  }
-  if (project.activeConversationId === convId) {
-    project.activeConversationId = project.conversations[0].id;
-  }
-  saveState();
-  render();
+async function persistConversation(conv) {
+  try {
+    await dbUpdateConversation(conv.id, {
+      messages: conv.messages,
+      active_file_ids: conv.activeFileIds,
+    });
+  } catch (e) { console.error("Conversation persist failed:", e); }
 }
 
 // ---------- File ops ----------
@@ -240,7 +415,6 @@ function readFile(file) {
         data = comma >= 0 ? data.slice(comma + 1) : data;
       }
       resolve({
-        id: uid(),
         name: file.name,
         kind,
         mediaType: file.type || "text/plain",
@@ -259,36 +433,43 @@ async function attachFiles(fileList) {
   if (!project || !conv) return;
   for (const f of fileList) {
     try {
-      const stored = await readFile(f);
+      const parsed = await readFile(f);
+      const stored = await dbCreateFile(project.id, parsed);
       project.files.push(stored);
       conv.activeFileIds.push(stored.id);
     } catch (e) {
       alert(`Couldn't read ${f.name}: ${e.message}`);
     }
   }
-  saveState();
+  await persistConversation(conv);
   render();
 }
 
-function toggleActiveFile(fileId) {
+async function toggleActiveFile(fileId) {
   const conv = getActiveConversation();
   if (!conv) return;
   const i = conv.activeFileIds.indexOf(fileId);
   if (i >= 0) conv.activeFileIds.splice(i, 1);
   else conv.activeFileIds.push(fileId);
-  saveState();
   render();
+  await persistConversation(conv);
 }
 
-function removeFile(fileId) {
+async function removeFile(fileId) {
   const project = getActiveProject();
   if (!project) return;
-  project.files = project.files.filter(f => f.id !== fileId);
-  for (const c of project.conversations) {
-    c.activeFileIds = c.activeFileIds.filter(id => id !== fileId);
+  try {
+    await dbDeleteFile(fileId);
+    project.files = project.files.filter(f => f.id !== fileId);
+    for (const c of project.conversations) {
+      const before = c.activeFileIds.length;
+      c.activeFileIds = c.activeFileIds.filter(id => id !== fileId);
+      if (c.activeFileIds.length !== before) await persistConversation(c);
+    }
+    render();
+  } catch (e) {
+    alert(`Couldn't remove file: ${e.message}`);
   }
-  saveState();
-  render();
 }
 
 // ---------- Building API requests ----------
@@ -324,11 +505,6 @@ function buildApiMessages(project, conv) {
     return { role: "assistant", content: msg.text || " " };
   });
 
-  // Mark the last content block of the last message as a cache breakpoint.
-  // On follow-up turns this caches the full prefix, so each turn pays full
-  // price only for the new content. Anthropic ignores markers on prefixes
-  // shorter than the cache minimum (~1024 tokens), so this is harmless on
-  // short conversations.
   const last = out[out.length - 1];
   if (last && Array.isArray(last.content) && last.content.length > 0) {
     last.content[last.content.length - 1].cache_control = { type: "ephemeral" };
@@ -339,9 +515,15 @@ function buildApiMessages(project, conv) {
 // ---------- Streaming ----------
 
 async function streamChat(payload, onEvent) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error("You're signed out. Refresh to sign back in.");
+
   const response = await fetch("/api/chat", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${session.access_token}`,
+    },
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
@@ -387,7 +569,6 @@ async function generateAssistant() {
   conv.messages.push(assistantMsg);
 
   isSending = true;
-  saveState();
   render();
 
   try {
@@ -424,7 +605,7 @@ async function generateAssistant() {
     updateAssistantBubble(assistantMsg);
   } finally {
     isSending = false;
-    saveState();
+    await persistConversation(conv);
     updateSendButton();
   }
 }
@@ -439,6 +620,7 @@ async function sendMessage(text) {
     fileIds: [...conv.activeFileIds],
   });
   conv.activeFileIds = [];
+  await persistConversation(conv);
   await generateAssistant();
 }
 
@@ -448,16 +630,16 @@ async function regenerateMessage(messageId) {
   const idx = conv.messages.findIndex(m => m.id === messageId);
   if (idx < 0 || conv.messages[idx].role !== "assistant") return;
   conv.messages = conv.messages.slice(0, idx);
-  saveState();
+  await persistConversation(conv);
   render();
   await generateAssistant();
 }
 
-function deleteMessage(messageId) {
+async function deleteMessage(messageId) {
   const conv = getActiveConversation();
   if (!conv) return;
   conv.messages = conv.messages.filter(m => m.id !== messageId);
-  saveState();
+  await persistConversation(conv);
   render();
 }
 
@@ -477,10 +659,6 @@ function estimateCost(tokens, perMillion) {
   if (!perMillion) return 0;
   return (tokens / 1_000_000) * perMillion;
 }
-
-// Anthropic's 5-minute prompt cache: writes cost 1.25x input, reads cost 0.1x.
-const CACHE_WRITE_MULT = 1.25;
-const CACHE_READ_MULT = 0.1;
 
 function messageCost(usage, info) {
   if (!usage) return 0;
@@ -537,7 +715,7 @@ function messageUsageLabel(msg, project) {
   return dollars ? `${tokens} · ${dollars}` : tokens;
 }
 
-// ---------- Export ----------
+// ---------- Export / Import ----------
 
 function downloadFile(filename, content, mimeType) {
   const blob = new Blob([content], { type: mimeType });
@@ -578,49 +756,6 @@ function exportConversationJson() {
   downloadFile(`${safeFilename(conv.name)}.json`, JSON.stringify(data, null, 2), "application/json");
 }
 
-async function importConversationJson(file) {
-  const project = getActiveProject();
-  if (!project) {
-    alert("Create a project first.");
-    return;
-  }
-  let data;
-  try {
-    data = JSON.parse(await file.text());
-  } catch (e) {
-    alert(`Couldn't parse JSON: ${e.message}`);
-    return;
-  }
-  if (!Array.isArray(data.messages)) {
-    alert("That doesn't look like a Beginner API export — no messages array.");
-    return;
-  }
-
-  const conv = {
-    id: uid(),
-    name: data.conversation || data.name || `Imported ${new Date().toLocaleDateString()}`,
-    createdAt: Date.now(),
-    messages: data.messages.map(m => ({
-      id: uid(),
-      role: m.role === "assistant" ? "assistant" : "user",
-      text: typeof m.text === "string" ? m.text : "",
-      thinkingText: m.thinkingText || "",
-      toolEvents: [],
-      usage: m.usage || null,
-      // Files referenced by name in the import aren't reproduced — the export
-      // doesn't include their bytes. We surface their names via `fileIds: []`
-      // and leave the real attachment behavior up to the user.
-      fileIds: [],
-    })),
-    activeFileIds: [],
-  };
-  project.conversations.unshift(conv);
-  project.activeConversationId = conv.id;
-  saveState();
-  render();
-  flashToast(`Imported ${conv.messages.length} messages`);
-}
-
 function exportConversationMarkdown() {
   const project = getActiveProject();
   const conv = getActiveConversation(project);
@@ -646,9 +781,50 @@ function exportConversationMarkdown() {
   downloadFile(`${safeFilename(conv.name)}.md`, md, "text/markdown");
 }
 
-// ---------- Rendering ----------
+async function importConversationJson(file) {
+  const project = getActiveProject();
+  if (!project) {
+    alert("Create a project first.");
+    return;
+  }
+  let data;
+  try {
+    data = JSON.parse(await file.text());
+  } catch (e) {
+    alert(`Couldn't parse JSON: ${e.message}`);
+    return;
+  }
+  if (!Array.isArray(data.messages)) {
+    alert("That doesn't look like a Beginner API export — no messages array.");
+    return;
+  }
+  const messages = data.messages.map(m => ({
+    id: uid(),
+    role: m.role === "assistant" ? "assistant" : "user",
+    text: typeof m.text === "string" ? m.text : "",
+    thinkingText: m.thinkingText || "",
+    toolEvents: [],
+    usage: m.usage || null,
+    fileIds: [],
+  }));
+  try {
+    const conv = await dbCreateConversation(
+      project.id,
+      data.conversation || data.name || `Imported ${new Date().toLocaleDateString()}`,
+    );
+    conv.messages = messages;
+    await dbUpdateConversation(conv.id, { messages });
+    project.conversations.unshift(conv);
+    project.activeConversationId = conv.id;
+    await dbUpdateProject(project.id, { active_conversation_id: conv.id });
+    render();
+    flashToast(`Imported ${messages.length} messages`);
+  } catch (e) {
+    alert(`Import failed: ${e.message}`);
+  }
+}
 
-const $ = (id) => document.getElementById(id);
+// ---------- Rendering ----------
 
 function render() {
   renderSidebar();
@@ -720,7 +896,6 @@ function renderSidebar() {
 
         subList.appendChild(row);
       }
-
       item.appendChild(subList);
     }
 
@@ -826,8 +1001,7 @@ function buildMessageNode(msg, project, conv) {
   const actions = document.createElement("div");
   actions.className = "msg-actions";
 
-  const copyBtn = mkActionBtn("📋", "Copy", () => copyMessage(msg.id));
-  actions.appendChild(copyBtn);
+  actions.appendChild(mkActionBtn("📋", "Copy", () => copyMessage(msg.id)));
 
   if (msg.role === "assistant") {
     const isLast = conv.messages[conv.messages.length - 1]?.id === msg.id;
@@ -1016,52 +1190,72 @@ function flashToast(text, isError = false) {
 
 // ---------- Wire it up ----------
 
-function init() {
+function wireSignIn() {
+  $("signin-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const email = $("signin-email").value.trim();
+    if (!email) return;
+    signIn(email);
+  });
+}
+
+function wireApp() {
+  $("signout-btn").addEventListener("click", signOut);
+
   $("new-project-btn").addEventListener("click", () => createProject());
 
-  $("project-name").addEventListener("change", (e) => {
+  $("project-name").addEventListener("change", async (e) => {
     const project = getActiveProject();
     if (!project) return;
-    project.name = e.target.value.trim() || "Untitled";
-    saveState();
+    const name = e.target.value.trim() || "Untitled";
+    project.name = name;
     renderSidebar();
+    try { await dbUpdateProject(project.id, { name }); }
+    catch (err) { alert(`Save failed: ${err.message}`); }
   });
 
-  $("conv-name").addEventListener("change", (e) => {
-    const conv = getActiveConversation();
+  $("conv-name").addEventListener("change", async (e) => {
+    const project = getActiveProject();
+    const conv = getActiveConversation(project);
     if (!conv) return;
-    conv.name = e.target.value.trim() || "Untitled";
-    saveState();
+    const name = e.target.value.trim() || "Untitled";
+    conv.name = name;
     renderSidebar();
+    try { await dbUpdateConversation(conv.id, { name }); }
+    catch (err) { alert(`Save failed: ${err.message}`); }
   });
 
-  $("model-select").addEventListener("change", (e) => {
+  $("model-select").addEventListener("change", async (e) => {
     const project = getActiveProject();
     if (!project) return;
     project.model = e.target.value;
-    saveState();
     renderProject();
+    try { await dbUpdateProject(project.id, { model: e.target.value }); }
+    catch (err) { console.error(err); }
   });
 
-  $("web-search-toggle").addEventListener("change", (e) => {
+  $("web-search-toggle").addEventListener("change", async (e) => {
     const project = getActiveProject();
     if (!project) return;
     project.webSearch = e.target.checked;
-    saveState();
+    try { await dbUpdateProject(project.id, { web_search: e.target.checked }); }
+    catch (err) { console.error(err); }
   });
 
-  $("thinking-toggle").addEventListener("change", (e) => {
+  $("thinking-toggle").addEventListener("change", async (e) => {
     const project = getActiveProject();
     if (!project) return;
     project.thinking = e.target.checked;
-    saveState();
+    try { await dbUpdateProject(project.id, { thinking: e.target.checked }); }
+    catch (err) { console.error(err); }
   });
 
-  $("system-prompt").addEventListener("change", (e) => {
+  $("system-prompt").addEventListener("change", async (e) => {
     const project = getActiveProject();
     if (!project) return;
     project.systemPrompt = e.target.value;
-    saveState();
+    try { await dbUpdateProject(project.id, { system_prompt: e.target.value }); }
+    catch (err) { console.error(err); }
   });
 
   $("settings-btn").addEventListener("click", () => $("settings-dialog").showModal());
@@ -1075,7 +1269,6 @@ function init() {
     if (project?.activeConversationId) deleteConversation(project.activeConversationId);
   });
 
-  // Export menu (toggle a small popover with two options)
   const exportBtn = $("export-btn");
   const exportMenu = $("export-menu");
   exportBtn.addEventListener("click", (e) => {
@@ -1116,9 +1309,12 @@ function init() {
     autosizeTextarea(prompt);
     await sendMessage(text);
   });
+}
 
-  if (!state.projects.length) createProject("My first project");
-  else render();
+function init() {
+  wireSignIn();
+  wireApp();
+  initSupabase();
 }
 
 document.addEventListener("DOMContentLoaded", init);

@@ -39,10 +39,77 @@ html, body {
 }
 
 body {
+  min-height: 100vh;
+}
+
+#app-shell {
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
   min-height: 100vh;
 }
+
+/* Sign-in & setup-error screens */
+.signin-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  z-index: 100;
+  padding: 24px;
+}
+
+.signin-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 32px;
+  max-width: 420px;
+  width: 100%;
+  text-align: center;
+}
+
+.signin-card h1 {
+  margin: 0 0 8px;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.signin-card .muted {
+  font-size: 14px;
+  margin: 8px 0 20px;
+}
+
+.signin-form {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.signin-form input[type="email"] {
+  flex: 1;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.signin-form input[type="email"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.signin-msg {
+  font-size: 13px;
+  margin: 8px 0;
+  min-height: 1em;
+}
+
+.signin-msg.success { color: var(--accent); }
+.signin-msg.error { color: var(--danger); }
 
 /* Sidebar */
 #sidebar {
@@ -185,6 +252,26 @@ body {
 .sidebar-footer a:hover { color: var(--text); }
 
 .sidebar-footer .sep { color: var(--border); margin: 0 4px; }
+
+.sidebar-footer .user-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  gap: 8px;
+}
+
+.sidebar-footer .user-row #user-email {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.ghost.small {
+  padding: 4px 8px;
+  font-size: 12px;
+}
 
 /* Main pane */
 #main {

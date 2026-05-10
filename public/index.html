@@ -5,78 +5,113 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Beginner API Interface</title>
   <link rel="stylesheet" href="/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
-  <aside id="sidebar">
-    <header class="sidebar-header">
+  <!-- Sign-in screen (shown when not authenticated) -->
+  <section id="signin-screen" class="signin-screen" hidden>
+    <div class="signin-card">
       <h1>Beginner API</h1>
-      <button id="new-project-btn" class="primary" title="New project">+ New project</button>
-    </header>
-    <nav id="project-list" aria-label="Projects"></nav>
-    <footer class="sidebar-footer">
-      <a href="https://docs.anthropic.com/en/api/getting-started" target="_blank" rel="noopener">API docs</a>
-      <span class="sep">·</span>
-      <a href="https://console.anthropic.com/" target="_blank" rel="noopener">Console</a>
-    </footer>
-  </aside>
-
-  <main id="main">
-    <div id="empty-state" class="empty-state">
-      <h2>No project selected</h2>
-      <p>Create a project on the left to get started.</p>
+      <p class="muted">Sign in with a magic link sent to your email.</p>
+      <form id="signin-form" class="signin-form" autocomplete="off">
+        <input type="email" id="signin-email" placeholder="you@example.com" required />
+        <button type="submit" class="primary">Send link</button>
+      </form>
+      <p id="signin-msg" class="signin-msg"></p>
+      <p class="muted small">No account needed — first sign-in creates one automatically.</p>
     </div>
+  </section>
 
-    <section id="project-view" hidden>
-      <header class="project-header">
-        <input id="project-name" class="project-name" type="text" maxlength="80" />
-        <div class="project-controls">
-          <select id="model-select" title="Model"></select>
-          <label class="toggle">
-            <input type="checkbox" id="web-search-toggle" />
-            <span>Web</span>
-          </label>
-          <label class="toggle" id="thinking-toggle-label">
-            <input type="checkbox" id="thinking-toggle" />
-            <span>Think</span>
-          </label>
-          <button id="settings-btn" class="ghost" title="Project settings">Settings</button>
-          <button id="delete-project-btn" class="danger ghost" title="Delete this project">Delete</button>
-        </div>
+  <!-- Setup error (shown if Supabase env vars are missing) -->
+  <section id="setup-error" class="signin-screen" hidden>
+    <div class="signin-card">
+      <h1>Setup needed</h1>
+      <p id="setup-error-msg" class="error"></p>
+      <p class="muted small">
+        See <a href="https://github.com/crmccarthy79-ai/beginner-api-interface/blob/main/docs/SUPABASE_SETUP.md" target="_blank" rel="noopener">docs/SUPABASE_SETUP.md</a> for the click-by-click guide.
+      </p>
+    </div>
+  </section>
+
+  <!-- Main app shell (shown when authenticated) -->
+  <div id="app-shell" hidden>
+    <aside id="sidebar">
+      <header class="sidebar-header">
+        <h1>Beginner API</h1>
+        <button id="new-project-btn" class="primary" title="New project">+ New project</button>
       </header>
-
-      <header class="conv-header">
-        <input id="conv-name" class="conv-name" type="text" maxlength="80" placeholder="Conversation name" />
-        <span id="conv-usage" class="conv-usage muted small"></span>
-        <div class="conv-controls">
-          <div class="export-wrap">
-            <button id="export-btn" class="ghost" title="Export conversation">Export ▾</button>
-            <div id="export-menu" class="export-menu" hidden>
-              <button id="export-md">Markdown (.md)</button>
-              <button id="export-json">JSON (.json)</button>
-            </div>
-          </div>
-          <button id="import-btn" class="ghost" title="Import a conversation from a JSON export">Import</button>
-          <input type="file" id="import-file" accept=".json,application/json" hidden />
-          <button id="delete-conv-btn" class="danger ghost" title="Delete this conversation">Delete chat</button>
+      <nav id="project-list" aria-label="Projects"></nav>
+      <footer class="sidebar-footer">
+        <div class="user-row">
+          <span id="user-email" class="muted small"></span>
+          <button id="signout-btn" class="ghost small">Sign out</button>
         </div>
-      </header>
+        <div class="links">
+          <a href="https://docs.anthropic.com/en/api/getting-started" target="_blank" rel="noopener">API docs</a>
+          <span class="sep">·</span>
+          <a href="https://console.anthropic.com/" target="_blank" rel="noopener">Console</a>
+        </div>
+      </footer>
+    </aside>
 
-      <div id="conversation" class="conversation" aria-live="polite"></div>
-
-      <div id="files-bar" class="files-bar" hidden>
-        <span class="files-bar-label">Attached:</span>
-        <ul id="active-files"></ul>
+    <main id="main">
+      <div id="empty-state" class="empty-state">
+        <h2>No project selected</h2>
+        <p>Create a project on the left to get started.</p>
       </div>
 
-      <form id="composer" class="composer" autocomplete="off">
-        <button type="button" id="attach-btn" class="ghost" title="Attach a file">📎</button>
-        <input type="file" id="file-input" multiple hidden
-               accept=".txt,.md,.markdown,.py,.js,.ts,.tsx,.jsx,.json,.html,.htm,.css,.csv,.tsv,.yml,.yaml,.toml,.xml,.sh,.rb,.go,.rs,.java,.c,.cpp,.h,.hpp,.pdf,.png,.jpg,.jpeg,.gif,.webp" />
-        <textarea id="prompt" rows="1" placeholder="Message Claude…" required></textarea>
-        <button type="submit" id="send-btn" class="primary">Send</button>
-      </form>
-    </section>
-  </main>
+      <section id="project-view" hidden>
+        <header class="project-header">
+          <input id="project-name" class="project-name" type="text" maxlength="80" />
+          <div class="project-controls">
+            <select id="model-select" title="Model"></select>
+            <label class="toggle">
+              <input type="checkbox" id="web-search-toggle" />
+              <span>Web</span>
+            </label>
+            <label class="toggle" id="thinking-toggle-label">
+              <input type="checkbox" id="thinking-toggle" />
+              <span>Think</span>
+            </label>
+            <button id="settings-btn" class="ghost" title="Project settings">Settings</button>
+            <button id="delete-project-btn" class="danger ghost" title="Delete this project">Delete</button>
+          </div>
+        </header>
+
+        <header class="conv-header">
+          <input id="conv-name" class="conv-name" type="text" maxlength="80" placeholder="Conversation name" />
+          <span id="conv-usage" class="conv-usage muted small"></span>
+          <div class="conv-controls">
+            <div class="export-wrap">
+              <button id="export-btn" class="ghost" title="Export conversation">Export ▾</button>
+              <div id="export-menu" class="export-menu" hidden>
+                <button id="export-md">Markdown (.md)</button>
+                <button id="export-json">JSON (.json)</button>
+              </div>
+            </div>
+            <button id="import-btn" class="ghost" title="Import a conversation from a JSON export">Import</button>
+            <input type="file" id="import-file" accept=".json,application/json" hidden />
+            <button id="delete-conv-btn" class="danger ghost" title="Delete this conversation">Delete chat</button>
+          </div>
+        </header>
+
+        <div id="conversation" class="conversation" aria-live="polite"></div>
+
+        <div id="files-bar" class="files-bar" hidden>
+          <span class="files-bar-label">Attached:</span>
+          <ul id="active-files"></ul>
+        </div>
+
+        <form id="composer" class="composer" autocomplete="off">
+          <button type="button" id="attach-btn" class="ghost" title="Attach a file">📎</button>
+          <input type="file" id="file-input" multiple hidden
+                 accept=".txt,.md,.markdown,.py,.js,.ts,.tsx,.jsx,.json,.html,.htm,.css,.csv,.tsv,.yml,.yaml,.toml,.xml,.sh,.rb,.go,.rs,.java,.c,.cpp,.h,.hpp,.pdf,.png,.jpg,.jpeg,.gif,.webp" />
+          <textarea id="prompt" rows="1" placeholder="Message Claude…" required></textarea>
+          <button type="submit" id="send-btn" class="primary">Send</button>
+        </form>
+      </section>
+    </main>
+  </div>
 
   <dialog id="settings-dialog">
     <form method="dialog" class="settings-form">

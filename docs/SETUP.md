@@ -1,19 +1,22 @@
 # Setup Guide — From Zero to Running
 
-This guide assumes you've never deployed something to Vercel and have only basic GitHub experience. If that's you, you're in the right place. Total time: about 10 minutes once you have your accounts.
+This guide assumes you've never deployed to Vercel and have only basic GitHub experience. Follow it top to bottom and you'll have a working, **safe-by-default** chat interface in about 15 minutes.
+
+By "safe-by-default" we mean: the deployed URL requires sign-in, conversations are private to each user, and a stranger who finds your URL can't spend your Anthropic credits. That protection comes from a piece called Supabase, which adds one extra setup step. It's worth the 5 minutes.
 
 ---
 
 ## What you'll need
 
-Three free things — sign up before you start so you don't have to stop mid-deploy:
+Four free things — sign up before you start so you don't have to stop mid-deploy:
 
 1. **A GitHub account** — sign up at [github.com](https://github.com) if you don't have one.
 2. **A Vercel account** — sign up at [vercel.com](https://vercel.com) using **"Continue with GitHub"**. Vercel is what hosts the actual website.
-3. **An Anthropic API key** — get one at [console.anthropic.com](https://console.anthropic.com/) → **Settings → API Keys → Create Key**.
-   - **Important:** Anthropic charges per use (it's not free). You'll need to add a payment method and a small amount of credit (usually $5 minimum) at **Plans & Billing** before the API actually works. A casual chat costs fractions of a cent — but you do need credits on file.
+3. **A Supabase account** — sign up at [supabase.com](https://supabase.com) using **GitHub**. Supabase handles sign-in and stores your conversations.
+4. **An Anthropic API key** — get one at [console.anthropic.com](https://console.anthropic.com/) → **Settings → API Keys → Create Key**.
+   - **Important:** Anthropic charges per use. Add a small credit balance (~$5) at **Plans & Billing** before chatting; otherwise the API rejects requests.
 
-Keep your API key somewhere safe (a password manager is ideal). It starts with `sk-ant-` and you'll paste it once during setup.
+Keep your API key somewhere safe (a password manager). It starts with `sk-ant-`.
 
 ---
 
@@ -22,115 +25,128 @@ Keep your API key somewhere safe (a password manager is ideal). It starts with `
 Forking = making your own copy of someone else's GitHub repo, under your account. Your copy is yours to change.
 
 1. Make sure you're logged into GitHub.
-2. At the top right of the [main repo page](https://github.com/crmccarthy79-ai/beginner-api-interface), click the **Fork** button.
-3. On the next screen, leave the defaults as-is and click **Create fork**.
-4. You'll land on YOUR copy. The URL will say `github.com/YOUR_USERNAME/beginner-api-interface`.
-
-That's your copy. Anything you change there won't affect the original.
+2. At the top right of [the main repo page](https://github.com/crmccarthy79-ai/beginner-api-interface), click **Fork**.
+3. Leave the defaults and click **Create fork**.
+4. You'll land on YOUR copy. The URL says `github.com/YOUR_USERNAME/beginner-api-interface`.
 
 ---
 
-## Step 2: Deploy it on Vercel
+## Step 2: Set up Supabase (one-time, ~5 min)
+
+Open [`docs/SUPABASE_SETUP.md`](SUPABASE_SETUP.md) and follow it step-by-step. It walks you through:
+
+- Creating a free Supabase project
+- Running the SQL schema (one paste-and-click)
+- Copying three values you'll need: **URL**, **anon key**, **JWT secret**
+- (After deploy) configuring magic-link redirects
+
+Come back here when you have those three values copied somewhere.
+
+---
+
+## Step 3: Deploy on Vercel
 
 You have two paths. Pick whichever feels easier.
 
 ### Easy path — Deploy button
 
-On your forked repo's README (the page you forked to), click the orange **Deploy with Vercel** button. It pre-fills everything for you, then jumps to step 4 below (the env var).
+On your forked repo's README, click the orange **Deploy with Vercel** button. It pre-fills everything for you, then jumps to the env-vars step below.
 
 ### Manual path
 
 1. Go to [vercel.com/new](https://vercel.com/new).
-2. You'll see a list of your GitHub repos. Find **beginner-api-interface** (your fork) and click **Import**.
+2. Find **beginner-api-interface** (your fork) and click **Import**.
    - First time only: Vercel will ask permission to read your GitHub repos. Allow it.
 
 ### The Configure Project screen (both paths land here)
 
-3. Most defaults are fine. The only thing you need to set is the environment variable:
-4. Find the **Environment Variables** section (on the same screen). Add one:
-   - **Name:** `ANTHROPIC_API_KEY` ← exactly that, all caps, with the underscore
-   - **Value:** paste your API key from Anthropic (the one starting with `sk-ant-`)
-5. Click **Deploy**.
-6. Wait ~30 seconds. You'll see a confetti animation when it's done.
-7. Click the preview thumbnail or the URL link to open your live site. The URL looks like `your-project-xyz123.vercel.app`.
+3. Find the **Environment Variables** section and add **four** variables:
 
-That's it — your copy is live on the internet.
+   | Name | Value |
+   |---|---|
+   | `ANTHROPIC_API_KEY` | your Anthropic key (starts with `sk-ant-`) |
+   | `SUPABASE_URL` | from Supabase → Settings → API → Project URL |
+   | `SUPABASE_ANON_KEY` | from Supabase → Settings → API → anon key |
+   | `SUPABASE_JWT_SECRET` | from Supabase → Settings → API → JWT Secret (under JWT Settings) |
 
----
-
-## Step 3: First chat
-
-Open your Vercel URL. The app should load immediately:
-
-1. A new project is auto-created. Click the project name at the top of the main pane to rename it.
-2. Type a message in the box at the bottom and press **Enter**.
-3. Watch the response stream in.
-
-If something didn't work, jump to **Common gotchas** below.
+4. Click **Deploy**.
+5. Wait ~30 seconds. You'll see a confetti animation when it's done.
+6. Click **Continue to Dashboard**, then click your project name. The production URL is at the top of the project Overview page (something like `your-project-xyz.vercel.app`). Click it to open your live site.
 
 ---
 
-## Step 4: Lock it down before sharing the URL (recommended)
+## Step 4: Tell Supabase about your URL
 
-By default your deployment is public — **anyone who knows the URL can chat, and every message they send costs you money** (your API key pays the bill). If you're only using this yourself, fix that with Vercel's free **Vercel Authentication** feature.
+You need to tell Supabase that magic-link emails are allowed to redirect to your new Vercel URL. Without this, sign-in won't complete.
 
-1. Go to [vercel.com](https://vercel.com) → click your project.
-2. In the left sidebar, click **Settings**.
-3. Click **Deployment Protection**.
-4. Find the **Vercel Authentication** section.
-5. Toggle it **on**, set it to apply to **All Deployments** (or just Production if you only want to protect your live URL), and click **Save**.
+1. Supabase dashboard → your project → **Authentication** (left sidebar) → **URL Configuration**.
+2. **Site URL:** paste your Vercel URL.
+3. **Redirect URLs:** add `https://your-project-xyz.vercel.app` and `https://your-project-xyz.vercel.app/*`.
+4. **Save**.
 
-That's it. Now when someone visits your URL, they'll see a "Sign in with Vercel" screen. Only people listed under **Settings → Members** can get past it — and on the free Hobby plan, that's just you.
+(See [`SUPABASE_SETUP.md` Step 5](SUPABASE_SETUP.md#step-5-configure-the-magic-link-redirect-recommended) for screenshots of what to look for.)
 
-> **Note:** "Vercel Authentication" gives you a per-Vercel-account login wall. For a single shared password (the kind you can give to a friend without making them sign up for Vercel), look at **Password Protection** in the same Deployment Protection page — but that one is currently a paid feature. Verify the tier in your own account before counting on it.
+---
 
-**If you want to share the running app with someone else without paying:** the cleanest path is to send them this repo, have them fork and deploy their own copy with their own API key. That way each person's costs are on their own bill. That's also the assumption this repo is built around.
+## Step 5: Sign in and chat
+
+Open your Vercel URL. You'll see a sign-in screen.
+
+1. Enter your email and click **Send link**.
+2. Check your inbox (and spam) for an email from Supabase. Click the link.
+3. You're back at your app, signed in.
+4. A first project is auto-created. Click the project name at the top to rename it.
+5. Type a message in the box at the bottom and press **Enter**.
+
+If you get this far, **you're done**. Your deployment is safe to share — anyone who knows the URL can see the sign-in screen, but only people who actually sign in can use it.
+
+---
+
+## Step 6: Want a *more* private deployment? (optional)
+
+By default, anyone with your URL can sign up and use the app — they'll spend credits on the API call, but they need to be signed in (which gives you their email). If you want the deployment locked to *just specific people*, two options:
+
+- **In Supabase:** Authentication → Settings → toggle off **Enable email signups**. Then in Authentication → Users, manually invite specific email addresses. Now only invited users can sign in.
+- **Set an Anthropic spending cap** at [console.anthropic.com](https://console.anthropic.com/) → Plans & Billing. Caps your blast radius if anything goes sideways.
 
 ---
 
 ## Common gotchas
 
-**"ANTHROPIC_API_KEY is not set" or 500 errors when sending a message.**
-You either skipped the env var, named it wrong, or added it after the deploy finished. Fix it:
-- Vercel dashboard → your project → **Settings → Environment Variables**
-- Make sure the name is exactly `ANTHROPIC_API_KEY` (no typos, no extra spaces)
-- Save, then go to **Deployments → most recent → ⋯ menu → Redeploy**
+**"Setup needed" screen.** Your Supabase env vars are missing or wrong in Vercel. Settings → Environment Variables → check `SUPABASE_URL` and `SUPABASE_ANON_KEY`, then redeploy.
 
-**"Insufficient credits" or 401 errors.**
-Anthropic doesn't give free usage out of the box. Go to [console.anthropic.com](https://console.anthropic.com/) → **Plans & Billing** → add a payment method and a small credit balance.
+**Magic link arrives but clicking it doesn't sign me in.** You skipped Step 4. Add your URL to Supabase's redirect allow-list.
 
-**My API key has spaces or weird characters.**
-You probably copied it with extra whitespace. Regenerate the key on the Anthropic console, copy carefully, and paste into the Vercel env var.
+**500 error or "Authentication required" when sending a message.** Either `ANTHROPIC_API_KEY` is missing/wrong, or `SUPABASE_JWT_SECRET` doesn't match the one in your Supabase project. Re-copy from Supabase → Settings → API and redeploy.
 
-**I made a code change. How do I deploy it?**
-Push to your forked GitHub repo (commit + push to `main`). Vercel auto-deploys whenever you push. Takes about 30 seconds.
+**"Insufficient credits."** Anthropic doesn't give free usage. Add a payment method at [console.anthropic.com](https://console.anthropic.com/) → Plans & Billing.
 
-**I want to start over.**
-In Vercel: dashboard → your project → **Settings → scroll to Delete Project**. Your GitHub fork stays safe — only the deployment is removed. You can re-import it any time.
+**I made a code change. How do I deploy it?** Push to your forked GitHub repo (commit + push to `main`). Vercel auto-deploys whenever you push. Takes about 30 seconds.
 
 ---
 
 ## What next?
 
-Once it works, the fun part — making it yours.
-
-- **Change the colors and theme** — edit `public/styles.css`, look at the `:root` section near the top. Change one variable, the whole UI updates.
-- **Change the default model** — edit `DEFAULT_MODEL` in `public/app.js`.
-- **Add a custom system prompt** — set `DEFAULT_SYSTEM` in `public/app.js`, OR set it per-project in the **Settings** dialog inside the running app.
-- **Add or remove models** — the `MODELS` array in `public/app.js` is the source of truth. Each entry has an `id`, `label`, and pricing.
-
-Each of these is a one-line change. Push to GitHub when you're done; Vercel redeploys automatically.
+- **Customize colors** — `public/styles.css`, the `:root` section near the top.
+- **Default model / system prompt** — `public/app.js`, the constants near the top.
+- **Add or remove models** — the `MODELS` array in `public/app.js`.
+- **Use Claude Code to make changes** — open the repo folder, run `claude`, describe what you want changed. See the README's "Customizing" section.
 
 ---
 
 ## Local development (optional)
 
-If you want to play with the code on your own computer without deploying every time:
-
 ```bash
 git clone https://github.com/YOUR_USERNAME/beginner-api-interface.git
 cd beginner-api-interface
-echo "ANTHROPIC_API_KEY=sk-ant-..." > .env   # paste your real key
+
+# Create a .env file with all four keys
+cat > .env <<EOF
+ANTHROPIC_API_KEY=sk-ant-...
+SUPABASE_URL=https://xxx.supabase.co
+SUPABASE_ANON_KEY=eyJ...
+SUPABASE_JWT_SECRET=...
+EOF
 
 # On macOS with Homebrew Python, install uv first:
 brew install uv
@@ -139,12 +155,10 @@ brew install uv
 npx vercel dev
 ```
 
-That gives you a localhost server with hot-reload.
+Add `http://localhost:3000` to your Supabase redirect URLs (Step 4) so magic links work locally too.
 
 ---
 
 ## Stuck?
 
-- **App loads but messages fail** — open browser dev tools (right-click → Inspect → Console tab) and look for red errors.
-- **Can't find your Vercel URL** — [vercel.com](https://vercel.com) → Dashboard → click your project → the URL is at the top.
-- **Truly stuck** — open an issue on the [original repo](https://github.com/crmccarthy79-ai/beginner-api-interface/issues) with what you tried and the error you saw. Be specific; "it's broken" is hard to debug.
+Open an issue on the [original repo](https://github.com/crmccarthy79-ai/beginner-api-interface/issues) with the exact step you got stuck on and what you saw.
