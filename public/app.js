@@ -474,8 +474,37 @@ async function removeFile(fileId) {
 
 // ---------- Building API requests ----------
 
-function buildApiMessages(project, conv) {
-  const out = conv.messages.map(msg => {
+function isFailedAssistantTurn(msg) {
+  if (msg.role !== "assistant") return false;
+  return !!msg.error || !(msg.text || "").trim();
+}
+
+// Drop user/assistant pairs where the assistant turn failed (empty text
+// or had an error). They're kept in conv.messages for the UI but Anthropic
+// rejects whitespace text blocks, so we strip them before the API call.
+// The very last message is the placeholder we're about to send — keep as-is.
+function cleanMessagesForApi(messages) {
+  if (messages.length === 0) return messages;
+  const last = messages[messages.length - 1];
+  const history = messages.slice(0, -1);
+  const cleaned = [];
+  let i = 0;
+  while (i < history.length) {
+    const m = history[i];
+    const next = history[i + 1];
+    if (m.role === "user" && next && isFailedAssistantTurn(next)) {
+      i += 2;
+      continue;
+    }
+    cleaned.push(m);
+    i++;
+  }
+  cleaned.push(last);
+  return cleaned;
+}
+
+function buildApiMessages(project, messages) {
+  const out = messages.map(msg => {
     if (msg.role === "user") {
       const content = [];
       for (const fid of msg.fileIds || []) {
@@ -502,7 +531,10 @@ function buildApiMessages(project, conv) {
       content.push({ type: "text", text: msg.text });
       return { role: "user", content };
     }
-    return { role: "assistant", content: msg.text || " " };
+    // Defensive: Anthropic rejects empty AND whitespace-only text. The
+    // cleanup pass above should remove failed turns, but if anything slips
+    // through we use a real word so the API doesn't 400.
+    return { role: "assistant", content: msg.text || "(no response)" };
   });
 
   const last = out[out.length - 1];
@@ -576,7 +608,7 @@ async function generateAssistant() {
       {
         model: project.model,
         system: project.systemPrompt || DEFAULT_SYSTEM,
-        messages: buildApiMessages(project, conv).slice(0, -1),
+        messages: buildApiMessages(project, cleanMessagesForApi(conv.messages)).slice(0, -1),
         useWebSearch: !!project.webSearch,
         thinking: !!project.thinking,
       },
